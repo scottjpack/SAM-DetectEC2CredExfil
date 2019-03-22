@@ -12,3 +12,6 @@ SAM Application to detect and alert on AWS EC2 Metadata Credential exfiltartion
   You must create an SNS Topic as an event on the bucket for all ObjectCreate calls.
   A tutorial on setting up permissions for that can be found in Step 1 and Step 3 here:
   https://docs.aws.amazon.com/AmazonS3/latest/dev/ways-to-add-notification-config-to-bucket.html
+
+
+More documentation to come...
