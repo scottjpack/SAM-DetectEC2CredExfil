@@ -1,0 +1,87 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "SAM Application for detecting EC2 Credential Compromise.\nWritten by\
+  \ Scott Pack.\nMany thanks to Will Bengston, who presented basically everything\
+  \ but the code at BH2018\n....Seriously, no point in me creating an architecture\
+  \ diagram.  Look at Slides 26 & 27.\nhttps://www.peerlyst.com/posts/blackhat-2018-detecting-credential-compromise-in-aws-william-bengtson-lorgor77\n\
+  \nThe intent here is that you already are aggregating your CloudTrail into an S3\
+  \ bucket.\nYou must create an SNS Topic as an event on the bucket for all ObjectCreate\
+  \ calls.\nA tutorial on setting up permissions for that can be found in Step 1 and\
+  \ Step 3 here:\nhttps://docs.aws.amazon.com/AmazonS3/latest/dev/ways-to-add-notification-config-to-bucket.html\n\
+  \n# The CloudtrailS3BucketName must be \n"
+Parameters:
+  CloudtrailSnsTopicArn:
+    Type: String
+    Description: An existing SNS Topic, to which PutObject events are published from
+      your CloudTrail S3 Bucket.  The evaluator function will be added as a subscriber.
+  CloudtrailS3BucketName:
+    Type: String
+    Description: The name of said bucket, used to provision Lambdas access for retrieving
+      CloudTrail events.
+Resources:
+  ExfilCloudwatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: EC2ExfiltrationLogsGroup
+      RetentionInDays: 365
+  AssumedRoleStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: sessionId
+        AttributeType: S
+      KeySchema:
+      - AttributeName: sessionId
+        KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+  RoleExceptionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: roleArn
+        AttributeType: S
+      KeySchema:
+      - AttributeName: roleArn
+        KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+  AnalyzeCloudtrailLogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: AnalyzeCloudtrailLogFunction.lambda_handler
+      Runtime: python2.7
+      CodeUri: s3://buckety-bucketface/49800e65e5b311a3792fc969e1b00503
+      Description: Lambda function to analyze cloudtrail for credential compromise.
+      MemorySize: 128
+      Timeout: 300
+      Policies:
+      - S3ReadPolicy:
+          BucketName:
+            Ref: CloudtrailS3BucketName
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: AssumedRoleStateTable
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: RoleExceptionsTable
+      - CloudWatchLogsFullAccess
+      Events:
+        SNS1:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: CloudtrailSnsTopicArn
+      Environment:
+        Variables:
+          assumedRoleStateTableName:
+            Ref: AssumedRoleStateTable
+          roleExceptionsTableName:
+            Ref: RoleExceptionsTable
+          exfilAlertLogGroup:
+            Ref: ExfilCloudwatchLogGroup

@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+
+Description: |
+  SAM Application for detecting EC2 Credential Compromise.
+  Written by Scott Pack.
+  Many thanks to Will Bengston, who presented basically everything but the code at BH2018
+  ....Seriously, no point in me creating an architecture diagram.  Look at Slides 26 & 27.
+  https://www.peerlyst.com/posts/blackhat-2018-detecting-credential-compromise-in-aws-william-bengtson-lorgor77
+
+  The intent here is that you already are aggregating your CloudTrail into an S3 bucket.
+  You must create an SNS Topic as an event on the bucket for all ObjectCreate calls.
+  A tutorial on setting up permissions for that can be found in Step 1 and Step 3 here:
+  https://docs.aws.amazon.com/AmazonS3/latest/dev/ways-to-add-notification-config-to-bucket.html
+
+  # The CloudtrailS3BucketName must be 
+
+Parameters:
+  CloudtrailSnsTopicArn:
+    Type: String
+    Description: An existing SNS Topic, to which PutObject events are published from your CloudTrail S3 Bucket.  The evaluator function will be added as a subscriber.
+  CloudtrailS3BucketName:
+    Type: String
+    Description: The name of said bucket, used to provision Lambdas access for retrieving CloudTrail events.
+
+Resources:
+
+  ExfilCloudwatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      LogGroupName: EC2ExfiltrationLogsGroup
+      RetentionInDays: 365
+
+  AssumedRoleStateTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: sessionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: sessionId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: True
+
+  RoleExceptionsTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: roleArn
+          AttributeType: S
+      KeySchema:
+        - AttributeName: roleArn
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+    # Column "whitelist" is an array of IP CIDRs to be ignored for a given role...Example:
+    # {"roleArn": "arn:aws:iam::555555555555:role/iam_role","whitelist": ["1.2.3.4/32"]}
+
+  AnalyzeCloudtrailLogFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Handler: AnalyzeCloudtrailLogFunction.lambda_handler
+      Runtime: python2.7
+      CodeUri: .
+      Description: Lambda function to analyze cloudtrail for credential compromise.
+      MemorySize: 128
+      Timeout: 300
+      Policies:
+        - S3ReadPolicy:
+            BucketName: 
+              Ref: CloudtrailS3BucketName
+        - DynamoDBCrudPolicy: 
+            TableName: !Ref AssumedRoleStateTable
+        - DynamoDBReadPolicy: 
+            TableName: !Ref RoleExceptionsTable
+        - CloudWatchLogsFullAccess
+      Events:
+        SNS1:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: CloudtrailSnsTopicArn
+      Environment:
+        Variables: 
+          assumedRoleStateTableName: !Ref AssumedRoleStateTable
+          roleExceptionsTableName: !Ref RoleExceptionsTable
+          exfilAlertLogGroup: !Ref ExfilCloudwatchLogGroup
+

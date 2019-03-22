@@ -1,0 +1,2 @@
+sam package --template-file detectec2credexfil.yaml --s3-bucket <ARTIFACT STAGING BUCKET> --output-template-file packaged.yaml
+aws cloudformation deploy --template-file packaged.yaml --stack-name DetectEc2Exfil1 --parameter-overrides CloudtrailS3BucketName=<CLOUDTRAIL S3 BUCKET NAME> CloudtrailSnsTopicArn=arn:aws:sns:<REGION>:<ACCTID>:<SNSTOPICNAME> --capabilities CAPABILITY_IAM
